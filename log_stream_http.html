@@ -1,0 +1,27 @@
+    <!DOCTYPE html>
+
+    <html>
+
+    <head>
+        <title>HTTP-Log Stream</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+    </head>
+
+    <body>
+
+        <h1>Http-Server Logs:</h1>
+        <div id="http-log-output"></div>
+        
+        <script>
+
+            var source = new EventSource("http://v5test2.tekstac.com/log-stream/http-log-stream");
+            // var source = new EventSource("http://127.0.0.1:8000/http-log-stream/"); # loal
+            source.onmessage = function(event) {
+            console.log("received:"+ event.data)
+            document.getElementById("http-log-output").innerHTML += event.data + "<br>";
+        };        
+        </script>
+
+    </body>
+
+    </html>
