@@ -58,22 +58,39 @@ async def read_root(request: Request):
 
 # Function to read log file in chunks
 async def ws_push_log_file(file_path, websocket=None):
-    with open(file_path, 'r') as f:
-        print(f'loaded:{file_path}')
-        while True:
-            chunk = f.readline()  # Read a chunk at a time
-            if not chunk:
-                if websocket:
-                    try:
-                        await asyncio.sleep(0.5)  # Wait for new data
-                        await websocket.send_text(chunk)
-                    except asyncio.CancelledError:
-                        print(f"Task for reading log file {file_path} was cancelled.\n#############\n{traceback.format_exc()}")
-                        # You can add cleanup code here if needed.
-                    except Exception as e:
-                        print(f'Exception in log reading: {e}\n\n@@@@@@@@@@@@@@@@@n{traceback.format_exc()}')
-            else:
-                continue
+    try:
+        with open(file_path, 'r') as f:
+            print(f'loaded:{file_path}')
+            while True:
+                chunk = f.readline()  # Read a chunk at a time
+                if not chunk:
+                    if websocket:
+                        try:
+                            await asyncio.sleep(0.5)  # Wait for new data
+                            # await websocket.send_text(chunk) #no need to send empty string
+                        except asyncio.CancelledError:
+                            print(f"Task for reading log file {file_path} was cancelled.\n#############\n{traceback.format_exc()}")
+                            # You can add cleanup code here if needed.
+                            return
+                        except Exception as e:
+                            print(f'Exception in log reading: {e}\n\n@@@@@@@@@@@@@@@@@n{traceback.format_exc()}')
+                            return
+                else:
+                    if websocket and websocket.client_state != websocket.CLOSED : # 3 = websocket.CLOSED:
+                        try:
+                            await websocket.send_text(chunk)
+                        except asyncio.CancelledError:
+                            print(f"Task for reading log file {file_path} was cancelled.\n#############\n{traceback.format_exc()}")
+                            return
+                        except Exception as e:
+                            print(f'Exception in log reading: {e}\n\n@@@@@@@@@@@@@@@@@n{traceback.format_exc()}')
+                            return
+    except Exception as e:
+        print(f"Error in ws_push_log_file: {e}\n{traceback.format_exc()}")
+    finally:
+        if websocket and websocket.client_state != websocket.CLOSED : # 3 = websocket.CLOSED
+          print(f"closing in ws_push_log_file")
+          await websocket.close()
 
 @app.websocket("/ws-log-stream")
 async def log_stream(websocket: WebSocket):
@@ -82,12 +99,13 @@ async def log_stream(websocket: WebSocket):
 
     try:
         print(f'calling ws: ws_push_log_file{logfile_path}')
-        asyncio.create_task(ws_push_log_file(logfile_path, websocket=websocket)) 
+        await ws_push_log_file(logfile_path, websocket=websocket)
     except Exception as e:
         print(f"Failed to initialize logger: {str(e)}\n****************\n{traceback.format_exc()}")
     finally:
         print(f'#######################closing websocket#####################')
-        await websocket.close()
+        if websocket.client_state != 3: # 3 = websocket.CLOSED
+          await websocket.close()
 
 
 async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=None):
@@ -116,14 +134,14 @@ async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=Non
                     # process the chunk line by line
                     lines = chunk.splitlines(keepends=True)
                     for line in lines:
-                        if await http_req.is_disconnected():
+                        if http_req is not None and await http_req.is_disconnected():
                             print("http-client disconnected!!!")
-                            break
+                            return
                         yield {"event": "message", "data": line}
                 else:
-                    time.sleep(delay)
-                    if await http_req.is_disconnected():
-                        print("http-client disconnected!!!")
+                    await asyncio.sleep(delay)
+                    if http_req is not None and await http_req.is_disconnected():
+                        print("http-client disconnected while sleeping!!!")
                         return
                     continue
     except FileNotFoundError:
@@ -138,10 +156,10 @@ async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=Non
 
 @app.get('/http-log-stream')
 async def run(request: Request):
-    print(f'calling ws: read_log_file{logfile_path}')
+    print(f'calling SSE: read_log_file{logfile_path}')
     event_generator = http_push_log_file(logfile_path, http_req=request)
     return EventSourceResponse(event_generator, media_type="text/event-stream")
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=9000)
+    uvicorn.run(app, host="127.0.0.1", port=7999)
