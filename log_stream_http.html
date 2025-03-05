@@ -26,7 +26,16 @@
                 new_msg.appendChild(document.createTextNode(event.data));
                 // base_node.insertBefore(new_msg, base_node.firstChild);
                 base_node.appendChild(new_msg);
-                base_node.scrollTop = base_node.scrollHeight;
+                // Check if the user is near the bottom
+                const isAtBottom =
+                    base_node.scrollTop + base_node.clientHeight >=
+                    base_node.scrollHeight - 2; // Added a small buffer for precision
+    
+                if (isAtBottom) {
+                    requestAnimationFrame(() => {
+                        base_node.scrollTop = base_node.scrollHeight;
+                    });
+                }
             };        
         </script>
 
