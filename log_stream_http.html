@@ -13,12 +13,20 @@
         <div id="http-log-output"></div>
         
         <script>
+            // Get the current page's URL
+            const currentURL = window.location.href;
+            const cur_host_name = new URL(currentURL).hostname;
 
-            var source = new EventSource("http://v5test2.tekstac.com/log-stream/http-log-stream");
-            // var source = new EventSource("http://127.0.0.1:8000/http-log-stream/"); # loal
+            // var source = new EventSource("http://${cur_host_name}/log-stream/http-log-stream"); // with nginx rev-proxy
+            var source = new EventSource(`http://${cur_host_name}:7999/http-log-stream/`); // local
             source.onmessage = function(event) {
-            console.log("received:"+ event.data)
-            document.getElementById("http-log-output").innerHTML += event.data + "<br>";
+            // console.log("received:"+ event.data)
+            base_node = document.getElementById("http-log-output");
+            new_msg = document.createElement("p");
+            new_msg.appendChild(document.createTextNode(event.data));
+            // base_node.insertBefore(new_msg, base_node.firstChild);
+            base_node.appendChild(new_msg);
+            base_node.scrollTop = base_node.scrollHeight;
         };        
         </script>
 
