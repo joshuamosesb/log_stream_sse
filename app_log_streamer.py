@@ -122,6 +122,9 @@ async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=Non
                         yield {"event": "message", "data": line}
                 else:
                     time.sleep(delay)
+                    if await http_req.is_disconnected():
+                        print("http-client disconnected!!!")
+                        return
                     continue
     except FileNotFoundError:
         print(f"Error: Log file not found at {file_path}")
