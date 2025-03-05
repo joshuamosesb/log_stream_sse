@@ -17,8 +17,8 @@
             const currentURL = window.location.href;
             const cur_host_name = new URL(currentURL).hostname;
 
-            // var source = new EventSource("http://${cur_host_name}/log-stream/http-log-stream"); // with nginx rev-proxy
-            var source = new EventSource(`http://${cur_host_name}:7999/http-log-stream/`); // local
+            // var source = new EventSource("https://${cur_host_name}/log-stream/http-log-stream"); // with nginx rev-proxy
+            var source = new EventSource(`https://${cur_host_name}:7999/http-log-stream/`); // local
             source.onmessage = function(event) {
                 // console.log("received:"+ event.data)
                 base_node = document.getElementById("http-log-output");
