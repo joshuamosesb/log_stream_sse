@@ -1,24 +1,23 @@
-from pathlib import Path
+import logging
 import os
-import time
+import asyncio
+import traceback
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
-
 from fastapi.templating import Jinja2Templates
-import asyncio
 import uvicorn
 from utils import get_root_path
-import traceback
 
+# Setup logging
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 base_dir = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(Path(base_dir)))
 
-if os.name == "nt":
-    app = FastAPI(root_path="/log-stream", docs_url=None, redoc_url=None)
-if os.name == "posix":
-    app = FastAPI(root_path="/log-stream", docs_url=None, redoc_url=None)
+app = FastAPI(root_path="/log-stream", docs_url=None, redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,84 +28,66 @@ app.add_middleware(
 )
 
 # Start reading the remote log file
-if os.name == "nt":
-    root_path = os.getcwd()
-else:
-    root_path = get_root_path('v5test2')
-# Define log path
+root_path = os.getcwd() if os.name == "nt" else get_root_path('v5test2')
+
 log_dir = os.path.join(root_path, 'api_logs')
 logfile_path = os.path.join(log_dir, 'app.log')
+
+async def close_websocket(websocket):
+    if websocket and websocket.client_state != websocket.CLOSED:
+        logger.info(f"Closing websocket")
+        await websocket.close()
 
 @app.get("/")
 async def read_root(request: Request):
     try:
-        # return {"message": "Welcome to the FastAPI application to stream app.log to the websocket!"}
         context = {"title": "FastAPI Streaming Log Viewer over WebSockets", "log_file": 'app.log'}
         return templates.TemplateResponse("log_stream_http.html", {"request": request, "context": context})
-    except:
-        print(f"ERROR in request: \n********************************\n{traceback.format_exc()}")
+    except Exception:
+        logger.error(f"ERROR in request:\n{traceback.format_exc()}")
 
-# sh not available in "nt"
-# from sh import tail
-# async def stream_log_tail(file_path, request):
-#     for line in tail("-f", file_path, _iter=True):
-#         if await request.is_disconnected():
-#             print("client disconnected!!!")
-#             break
-#         yield line
-#         time.sleep(0.5)
-
-# Function to read log file in chunks
 async def ws_push_log_file(file_path, websocket=None):
     try:
         with open(file_path, 'r') as f:
-            print(f'loaded:{file_path}')
+            logger.info(f'Loaded: {file_path}')
             while True:
-                chunk = f.readline()  # Read a chunk at a time
+                chunk = f.readline()
                 if not chunk:
                     if websocket:
                         try:
-                            await asyncio.sleep(0.5)  # Wait for new data
-                            # await websocket.send_text(chunk) #no need to send empty string
+                            await asyncio.sleep(0.5)
                         except asyncio.CancelledError:
-                            print(f"Task for reading log file {file_path} was cancelled.\n#############\n{traceback.format_exc()}")
-                            # You can add cleanup code here if needed.
+                            logger.error(f"Task for reading log file {file_path} was cancelled.\n{traceback.format_exc()}")
                             return
                         except Exception as e:
-                            print(f'Exception in log reading: {e}\n\n@@@@@@@@@@@@@@@@@n{traceback.format_exc()}')
+                            logger.error(f"Exception in log reading: {e}\n{traceback.format_exc()}")
                             return
                 else:
-                    if websocket and websocket.client_state != websocket.CLOSED : # 3 = websocket.CLOSED:
+                    if websocket and websocket.client_state != websocket.CLOSED:
                         try:
                             await websocket.send_text(chunk)
                         except asyncio.CancelledError:
-                            print(f"Task for reading log file {file_path} was cancelled.\n#############\n{traceback.format_exc()}")
+                            logger.error(f"Task for reading log file {file_path} was cancelled.\n{traceback.format_exc()}")
                             return
                         except Exception as e:
-                            print(f'Exception in log reading: {e}\n\n@@@@@@@@@@@@@@@@@n{traceback.format_exc()}')
+                            logger.error(f"Exception in log reading: {e}\n{traceback.format_exc()}")
                             return
     except Exception as e:
-        print(f"Error in ws_push_log_file: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error in ws_push_log_file: {e}\n{traceback.format_exc()}")
     finally:
-        if websocket and websocket.client_state != websocket.CLOSED : # 3 = websocket.CLOSED
-          print(f"closing in ws_push_log_file")
-          await websocket.close()
+        await close_websocket(websocket)
 
 @app.websocket("/ws-log-stream")
 async def log_stream(websocket: WebSocket):
-
     await websocket.accept()
-
     try:
-        print(f'calling ws: ws_push_log_file{logfile_path}')
+        logger.info(f'Calling ws: ws_push_log_file {logfile_path}')
         await ws_push_log_file(logfile_path, websocket=websocket)
     except Exception as e:
-        print(f"Failed to initialize logger: {str(e)}\n****************\n{traceback.format_exc()}")
+        logger.error(f"Failed to initialize logger: {str(e)}\n{traceback.format_exc()}")
     finally:
-        print(f'#######################closing websocket#####################')
-        if websocket.client_state != 3: # 3 = websocket.CLOSED
-          await websocket.close()
-
+        logger.info(f'Closing websocket')
+        await close_websocket(websocket)
 
 async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=None):
     """
@@ -123,7 +104,7 @@ async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=Non
     try:
         file_size = 0
         with open(file_path, 'r') as log_file:
-            print(f'loaded:{file_path}')
+            logger.debug(f'loaded:{file_path}')
             while True:
                 current_file_size = os.path.getsize(file_path)
                 if current_file_size > file_size:
@@ -135,28 +116,28 @@ async def http_push_log_file(file_path, chunk_size=1024, delay=0.5, http_req=Non
                     lines = chunk.splitlines(keepends=True)
                     for line in lines:
                         if http_req is not None and await http_req.is_disconnected():
-                            print("http-client disconnected!!!")
+                            logger.error("http-client disconnected!!!")
                             return
                         yield {"event": "message", "data": line}
                 else:
                     await asyncio.sleep(delay)
                     if http_req is not None and await http_req.is_disconnected():
-                        print("http-client disconnected while sleeping!!!")
+                        logger.error("http-client disconnected while sleeping!!!")
                         return
                     continue
     except FileNotFoundError:
-        print(f"Error: Log file not found at {file_path}")
+        logger.error(f"Error: Log file not found at {file_path}")
         yield {"event": "message", "data":f"Error: Log file not found at {file_path}"}
         return
     except Exception as e:
-        print(f"Error reading log file: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error reading log file: {e}\n{traceback.format_exc()}")
         yield {"event": "message", "data":f"Error reading log file: {e}\n{traceback.format_exc()}"}
         return
 
 
 @app.get('/http-log-stream')
 async def run(request: Request):
-    print(f'calling SSE: read_log_file{logfile_path}')
+    logger.debug(f'calling SSE: read_log_file{logfile_path}')
     event_generator = http_push_log_file(logfile_path, http_req=request)
     return EventSourceResponse(event_generator, media_type="text/event-stream")
 
